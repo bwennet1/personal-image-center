@@ -43,6 +43,21 @@ export function nextPlayableIndex(
   return { index: from, skipped };
 }
 
+/**
+ * Player-path skip: mark the slide currently on screen as failed, then
+ * advance with nextPlayableIndex. Must not jump back to index 0.
+ */
+export function applySlideLoadFailure<T extends SlideshowPlayItem>(
+  items: T[],
+  from: number,
+): { items: T[]; index: number; skipped: number } {
+  if (items.length === 0) return { items, index: 0, skipped: 0 };
+  const safeFrom = Math.min(Math.max(from, 0), items.length - 1);
+  const marked = items.map((item, i) => (i === safeFrom ? { ...item, failed: true } : item)) as T[];
+  const next = nextPlayableIndex(marked, safeFrom, 1);
+  return { items: marked, index: next.index, skipped: next.skipped };
+}
+
 export function shouldAbortSlideshowOnImageFailure(): false {
   return false;
 }

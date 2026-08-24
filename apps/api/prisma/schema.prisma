@@ -260,7 +260,7 @@ model MediaAsset {
   failureReason    String?
   trashedAt        DateTime?
   statusBeforeTrash MediaStatus?
-  currentDisplay   VersionType @default(ORIGINAL)
+  currentDisplay   VersionType @default(THUMBNAIL)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 

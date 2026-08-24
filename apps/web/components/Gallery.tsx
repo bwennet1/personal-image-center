@@ -13,7 +13,7 @@ function monthLabel(iso: string | null): string {
 }
 
 export function Gallery({ view, q }: { view?: string; q?: string }) {
-  const { spaceId, ready, role } = useSpace();
+  const { spaceId, ready, capabilities } = useSpace();
   const [items, setItems] = useState<MediaItem[]>([]);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState("");
@@ -97,7 +97,9 @@ export function Gallery({ view, q }: { view?: string; q?: string }) {
 
   const readyItems = items.filter((i) => i.status === "READY" || i.status === "PARTIAL_READY" || view === "trash");
   const viewer = viewerIndex != null ? readyItems[viewerIndex] : null;
-  const canOriginal = role === "OWNER" || role === "ADMIN" || role === "EDITOR";
+  const canOriginal = capabilities.includes("download_original");
+  const canShare = capabilities.includes("create_share");
+  const canDelete = capabilities.includes("delete_media");
 
   useEffect(() => {
     if (viewerIndex == null) return;
@@ -204,6 +206,7 @@ export function Gallery({ view, q }: { view?: string; q?: string }) {
           <label className="btn" style={{ width: "auto", cursor: "pointer" }}>
             {busy || zh.upload}
             <input
+              id="gallery-upload"
               className="hidden"
               type="file"
               accept="image/jpeg,image/png,image/webp,image/avif,image/gif"
@@ -349,12 +352,16 @@ export function Gallery({ view, q }: { view?: string; q?: string }) {
                 <button className="btn ghost" style={{ width: "auto" }} onClick={() => toggleFav(viewer.id, !viewer.favorite)}>
                   {viewer.favorite ? "已收藏" : "收藏"}
                 </button>
-                <button className="btn ghost" style={{ width: "auto" }} onClick={shareCurrent}>
-                  分享
-                </button>
-                <button className="btn ghost" style={{ width: "auto" }} onClick={trashCurrent}>
-                  删除
-                </button>
+                {canShare ? (
+                  <button className="btn ghost" style={{ width: "auto" }} onClick={shareCurrent}>
+                    分享
+                  </button>
+                ) : null}
+                {canDelete ? (
+                  <button className="btn ghost" style={{ width: "auto" }} onClick={trashCurrent}>
+                    删除
+                  </button>
+                ) : null}
               </>
             )}
             <button className="btn ghost" style={{ width: "auto" }} onClick={() => setViewerIndex(null)}>

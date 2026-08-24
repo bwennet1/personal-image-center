@@ -6,6 +6,7 @@ import { fail } from "../domain/errors";
 import { randomToken, sha256 } from "../domain/tokens";
 import { SESSION_COOKIE } from "../common/cookies";
 import { SpaceType } from "@prisma/client";
+import { capabilitiesFor, SpaceRole } from "../domain/capabilities";
 
 export interface RequestUser {
   id: string;
@@ -120,6 +121,7 @@ export class AuthService {
         name: m.space.name,
         type: m.space.type,
         role: m.role,
+        capabilities: capabilitiesFor(m.role as SpaceRole),
       })),
     };
   }

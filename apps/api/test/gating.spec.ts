@@ -8,7 +8,12 @@ import { StorageService } from "../src/storage/storage.service";
 import { processImageJob } from "../src/media/media-processor";
 import { hasCapability } from "../src/domain/capabilities";
 import { decideShareAccess } from "../src/domain/share-access";
-import { nextPlayableIndex, shouldAbortSlideshowOnImageFailure } from "../src/domain/slideshow-player";
+import {
+  applySlideLoadFailure,
+  nextPlayableIndex,
+  shouldAbortSlideshowOnImageFailure,
+} from "../src/domain/slideshow-player";
+import { drainCursorPages } from "../src/domain/cursor";
 import { collectMediaAssetIdsFromBlocks } from "../src/domain/presentations";
 import { detectImageMime } from "../src/domain/mime";
 
@@ -165,6 +170,22 @@ describe("个人图片中心 gating", () => {
     expect(next.skipped).toBe(1);
   });
 
+  it("player-path mid-show load failure skips to the next playable, not index 0", () => {
+    const items = [
+      { assetId: "first", failed: false },
+      { assetId: "middle", failed: false },
+      { assetId: "last", failed: false },
+    ];
+    const after = applySlideLoadFailure(items, 1);
+    expect(after.items[1].failed).toBe(true);
+    expect(after.index).toBe(2);
+    expect(after.items[after.index].assetId).toBe("last");
+    expect(after.index).not.toBe(0);
+    const fromStart = applySlideLoadFailure(items, 0);
+    expect(fromStart.index).toBe(1);
+    expect(fromStart.items[fromStart.index].assetId).toBe("middle");
+  });
+
   it("email+password register+login returns a session user with spaces", async () => {
     const email = `owner-${stamp}@pic.test`;
     const password = "password12";
@@ -226,6 +247,21 @@ describe("个人图片中心 gating", () => {
     expect(deleteSpace.status).toBe(403);
     expect(deleteSpace.body.code).toBe("SPACE_ACCESS_DENIED");
 
+    const viewerShare = await request(server)
+      .post(`/spaces/${spaceId}/shares`)
+      .set("Cookie", viewerCookie)
+      .send({ targetType: "MEDIA", targetId: "x", accessMode: "PUBLIC" });
+    expect(viewerShare.status).toBe(403);
+    expect(viewerShare.body.code).toBe("SPACE_ACCESS_DENIED");
+
+    const viewerAlbum = await request(server)
+      .post(`/spaces/${spaceId}/albums`)
+      .set("Cookie", viewerCookie)
+      .send({ name: "不行" });
+    expect(viewerAlbum.status).toBe(403);
+    expect(viewerAlbum.body.code).toBe("SPACE_ACCESS_DENIED");
+
+    expect(ownerReg.body.spaces[0].capabilities).toContain("upload_media");
     expect(ownerReg.body.id).toBeTruthy();
     expect(editorReg.body.id).toBeTruthy();
   });
@@ -278,9 +314,20 @@ describe("个人图片中心 gating", () => {
     const types = ready!.versions.map((v) => v.versionType).sort();
     expect(types).toEqual(["OPTIMIZED_1280", "OPTIMIZED_2560", "ORIGINAL", "THUMBNAIL"].sort());
 
+    const spaceAfterFirst = await prisma.space.findUnique({ where: { id: spaceId } });
+    const optAfterFirst = spaceAfterFirst!.usedOptimizedBytes;
+
     await processImageJob({ prisma, storage }, assetId);
     const again = await prisma.mediaAsset.findUnique({ where: { id: assetId }, include: { versions: true } });
     expect(again!.versions).toHaveLength(4);
+    const spaceAfterSecond = await prisma.space.findUnique({ where: { id: spaceId } });
+    expect(spaceAfterSecond!.usedOptimizedBytes).toBe(optAfterFirst);
+
+    const retried = await request(server)
+      .post(`/spaces/${spaceId}/media/${assetId}/retry`)
+      .set("Cookie", cookie);
+    expect(retried.status).toBe(201);
+    expect(retried.body.versions).toHaveLength(4);
 
     const png = await pngFixture();
     const s2 = await request(server)
@@ -490,7 +537,7 @@ describe("个人图片中心 gating", () => {
     expect(pres.status).toBe(201);
     expect(pres.body.preset).toBe("family_memorial");
     expect(pres.body.blocks.map((b: { type: string }) => b.type)).toEqual(
-      expect.arrayContaining(["cover", "text", "gallery", "slideshow", "timeline", "ending"]),
+      expect.arrayContaining(["cover", "text", "image", "gallery", "slideshow", "timeline", "ending"]),
     );
     expect(pres.body.referencedMediaAssetIds).toContain(assetId);
 
@@ -628,6 +675,128 @@ describe("个人图片中心 gating", () => {
     expect(ids).not.toContain(other);
     const empty = await request(server).get(`/spaces/${spaceId}/media?q=no-such-photo`).set("Cookie", cookie);
     expect(empty.body.items).toEqual([]);
+  });
+
+  it("cross-space access is denied and content MIME is required for webp/gif/avif", async () => {
+    const password = "password12";
+    const a = await request(server).post("/auth/register").send({ email: `xa-${stamp}@pic.test`, password });
+    const b = await request(server).post("/auth/register").send({ email: `xb-${stamp}@pic.test`, password });
+    const cookieA = cookieFrom(a);
+    const cookieB = cookieFrom(b);
+    const spaceA = a.body.spaces[0].id as string;
+    const spaceB = b.body.spaces[0].id as string;
+    const assetA = await uploadReady(cookieA, spaceA, "only-a.jpg");
+
+    const leakDetail = await request(server).get(`/spaces/${spaceB}/media/${assetA}`).set("Cookie", cookieB);
+    expect(leakDetail.status).toBe(404);
+    expect(leakDetail.body.code).toBe("MEDIA_NOT_FOUND");
+    const leakList = await request(server).get(`/spaces/${spaceA}/media`).set("Cookie", cookieB);
+    expect(leakList.status).toBe(403);
+    expect(leakList.body.code).toBe("SPACE_ACCESS_DENIED");
+    const leakFile = await request(server)
+      .get(`/spaces/${spaceA}/media/${assetA}/file?v=thumbnail`)
+      .set("Cookie", cookieB);
+    expect(leakFile.status).toBe(403);
+
+    const webp = await sharp({
+      create: { width: 48, height: 36, channels: 3, background: { r: 10, g: 180, b: 90 } },
+    })
+      .webp()
+      .toBuffer();
+    expect(detectImageMime(webp)).toBe("image/webp");
+    const sWebp = await request(server)
+      .post("/uploads/session")
+      .set("Cookie", cookieA)
+      .send({ spaceId: spaceA, filename: "leaf.webp", mimeType: "image/webp", bytes: webp.length });
+    await request(server).put(`/uploads/${sWebp.body.sessionId}/object`).set("Cookie", cookieA).send(webp);
+    const cWebp = await request(server).post(`/uploads/${sWebp.body.sessionId}/complete`).set("Cookie", cookieA);
+    await processImageJob({ prisma, storage }, cWebp.body.asset.id);
+    const webpAsset = await prisma.mediaAsset.findUnique({ where: { id: cWebp.body.asset.id } });
+    expect(webpAsset?.status).toBe("READY");
+    expect(webpAsset?.mimeType).toBe("image/webp");
+
+    const gif = await sharp({
+      create: { width: 32, height: 24, channels: 3, background: { r: 200, g: 20, b: 20 } },
+    })
+      .gif()
+      .toBuffer();
+    expect(detectImageMime(gif)).toBe("image/gif");
+    const sGif = await request(server)
+      .post("/uploads/session")
+      .set("Cookie", cookieA)
+      .send({ spaceId: spaceA, filename: "dot.gif", mimeType: "image/gif", bytes: gif.length });
+    await request(server).put(`/uploads/${sGif.body.sessionId}/object`).set("Cookie", cookieA).send(gif);
+    const cGif = await request(server).post(`/uploads/${sGif.body.sessionId}/complete`).set("Cookie", cookieA);
+    await processImageJob({ prisma, storage }, cGif.body.asset.id);
+    const gifAsset = await prisma.mediaAsset.findUnique({ where: { id: cGif.body.asset.id } });
+    expect(gifAsset?.status).toBe("READY");
+
+    const avif = await sharp({
+      create: { width: 32, height: 24, channels: 3, background: { r: 20, g: 20, b: 200 } },
+    })
+      .avif()
+      .toBuffer();
+    expect(detectImageMime(avif)).toBe("image/avif");
+    const sAvif = await request(server)
+      .post("/uploads/session")
+      .set("Cookie", cookieA)
+      .send({ spaceId: spaceA, filename: "sky.avif", mimeType: "image/avif", bytes: avif.length });
+    await request(server).put(`/uploads/${sAvif.body.sessionId}/object`).set("Cookie", cookieA).send(avif);
+    const cAvif = await request(server).post(`/uploads/${sAvif.body.sessionId}/complete`).set("Cookie", cookieA);
+    await processImageJob({ prisma, storage }, cAvif.body.asset.id);
+    const avifAsset = await prisma.mediaAsset.findUnique({ where: { id: cAvif.body.asset.id } });
+    expect(avifAsset?.status).toBe("READY");
+
+    const lying = Buffer.from("not-a-jpeg-at-all");
+    expect(detectImageMime(lying)).toBeNull();
+    const sLie = await request(server)
+      .post("/uploads/session")
+      .set("Cookie", cookieA)
+      .send({ spaceId: spaceA, filename: "fake.jpg", mimeType: "image/jpeg", bytes: lying.length });
+    await request(server).put(`/uploads/${sLie.body.sessionId}/object`).set("Cookie", cookieA).send(lying);
+    const cLie = await request(server).post(`/uploads/${sLie.body.sessionId}/complete`).set("Cookie", cookieA);
+    await processImageJob({ prisma, storage }, cLie.body.asset.id);
+    const lieAsset = await prisma.mediaAsset.findUnique({ where: { id: cLie.body.asset.id } });
+    expect(lieAsset?.status).toBe("PROCESSING_FAILED");
+    const lib = await request(server).get(`/spaces/${spaceA}/media`).set("Cookie", cookieA);
+    expect(lib.body.items.map((i: { id: string }) => i.id)).not.toContain(cLie.body.asset.id);
+  });
+
+  it("list cursor pages plus drainCursorPages return every READY asset", async () => {
+    const email = `cursor-${stamp}@pic.test`;
+    const password = "password12";
+    const reg = await request(server).post("/auth/register").send({ email, password });
+    const cookie = cookieFrom(reg);
+    const spaceId = reg.body.spaces[0].id as string;
+    const ids: string[] = [];
+    for (const name of ["c1.jpg", "c2.jpg", "c3.jpg", "c4.jpg", "c5.jpg"]) {
+      ids.push(await uploadReady(cookie, spaceId, name));
+    }
+
+    const page1 = await request(server).get(`/spaces/${spaceId}/media?limit=2`).set("Cookie", cookie);
+    expect(page1.status).toBe(200);
+    expect(page1.body.items).toHaveLength(2);
+    expect(page1.body.hasMore).toBe(true);
+    expect(page1.body.nextCursor).toBeTruthy();
+
+    const page2 = await request(server)
+      .get(`/spaces/${spaceId}/media?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`)
+      .set("Cookie", cookie);
+    expect(page2.body.items).toHaveLength(2);
+    expect(page2.body.hasMore).toBe(true);
+
+    const drained = await drainCursorPages<{ id: string }>(async (cursor) => {
+      const qs = cursor
+        ? `/spaces/${spaceId}/media?limit=2&cursor=${encodeURIComponent(cursor)}`
+        : `/spaces/${spaceId}/media?limit=2`;
+      const res = await request(server).get(qs).set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      return res.body;
+    });
+    const drainedIds = drained.map((i) => i.id);
+    expect(drainedIds).toHaveLength(5);
+    expect(new Set(drainedIds).size).toBe(5);
+    for (const id of ids) expect(drainedIds).toContain(id);
   });
 });
 

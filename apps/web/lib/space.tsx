@@ -5,6 +5,7 @@ import { createContext, useContext } from "react";
 export type SpaceState = {
   spaceId: string;
   role: string;
+  capabilities: string[];
   ready: boolean;
   refresh: () => Promise<void>;
 };
@@ -12,6 +13,7 @@ export type SpaceState = {
 export const SpaceContext = createContext<SpaceState>({
   spaceId: "",
   role: "",
+  capabilities: [],
   ready: false,
   refresh: async () => undefined,
 });

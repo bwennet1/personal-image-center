@@ -42,6 +42,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
   const [me, setMe] = useState<Me | null>(null);
   const [spaceId, setSpaceId] = useState("");
   const [role, setRole] = useState("");
+  const [capabilities, setCapabilities] = useState<string[]>([]);
   const [ready, setReady] = useState(false);
   const [query, setQuery] = useState("");
   const heading = title || titleOf(pathname);
@@ -54,6 +55,7 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
     if (pick) {
       setSpaceId(pick.id);
       setRole(pick.role);
+      setCapabilities(pick.capabilities || []);
       localStorage.setItem(SPACE_KEY, pick.id);
       window.dispatchEvent(new CustomEvent("pic-space", { detail: pick.id }));
     }
@@ -78,14 +80,15 @@ export function AppShell({ children, title }: { children: ReactNode; title?: str
     const space = me?.spaces.find((s) => s.id === id);
     setSpaceId(id);
     setRole(space?.role || "");
+    setCapabilities(space?.capabilities || []);
     localStorage.setItem(SPACE_KEY, id);
     window.dispatchEvent(new CustomEvent("pic-space", { detail: id }));
   }
 
   const spaces: Space[] = me?.spaces || [];
   const ctx = useMemo(
-    () => ({ spaceId, role, ready, refresh: () => refresh() }),
-    [spaceId, role, ready],
+    () => ({ spaceId, role, capabilities, ready, refresh: () => refresh() }),
+    [spaceId, role, capabilities, ready],
   );
 
   return (

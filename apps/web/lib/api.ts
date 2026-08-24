@@ -1,4 +1,6 @@
-export type Space = { id: string; name: string; type: string; role: string };
+import { drainCursorPages } from "../../api/src/domain/cursor";
+
+export type Space = { id: string; name: string; type: string; role: string; capabilities?: string[] };
 
 export type Me = {
   id: string;
@@ -65,14 +67,18 @@ export const api = {
     }).then(parse) as Promise<Me>,
   logout: () => fetch("/backend/auth/logout", { method: "POST", credentials: "include" }).then(parse),
   spaces: () => fetch("/backend/spaces", { credentials: "include" }).then(parse) as Promise<Space[]>,
-  media: (spaceId: string, view?: string, q?: string) => {
-    const sp = new URLSearchParams();
-    if (view) sp.set("view", view);
-    if (q) sp.set("q", q);
-    const qs = sp.toString();
-    return fetch(`/backend/spaces/${spaceId}/media${qs ? `?${qs}` : ""}`, { credentials: "include" }).then(
-      parse,
-    ) as Promise<{ items: MediaItem[]; hasMore: boolean }>;
+  async media(spaceId: string, view?: string, q?: string) {
+    const items = await drainCursorPages<MediaItem>(async (cursor) => {
+      const sp = new URLSearchParams();
+      if (view) sp.set("view", view);
+      if (q) sp.set("q", q);
+      if (cursor) sp.set("cursor", cursor);
+      sp.set("limit", "40");
+      return (await fetch(`/backend/spaces/${spaceId}/media?${sp.toString()}`, { credentials: "include" }).then(
+        parse,
+      )) as { items: MediaItem[]; hasMore: boolean; nextCursor?: string | null };
+    });
+    return { items, hasMore: false, nextCursor: null as string | null };
   },
   mediaDetail: (spaceId: string, id: string) =>
     fetch(`/backend/spaces/${spaceId}/media/${id}`, { credentials: "include" }).then(parse),

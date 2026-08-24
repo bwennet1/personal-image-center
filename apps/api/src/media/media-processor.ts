@@ -30,11 +30,11 @@ async function writeVersion(
   mime: string,
   width: number,
   height: number,
-): Promise<void> {
+): Promise<{ created: boolean; bytes: number }> {
   const existing = await deps.prisma.mediaVersion.findUnique({
     where: { mediaAssetId_versionType: { mediaAssetId: assetId, versionType: type } },
   });
-  if (existing) return;
+  if (existing) return { created: false, bytes: 0 };
   await deps.storage.putObject(objectKey, buf, mime);
   const checksum = createHash("sha256").update(buf).digest("hex");
   try {
@@ -51,9 +51,10 @@ async function writeVersion(
         checksum,
       },
     });
+    return { created: true, bytes: buf.length };
   } catch (err: unknown) {
     const code = (err as { code?: string }).code;
-    if (code === "P2002") return;
+    if (code === "P2002") return { created: false, bytes: 0 };
     throw err;
   }
 }
@@ -171,9 +172,10 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
   const height = meta.height || 0;
 
   const failures: string[] = [];
+  let newOptBytes = 0;
   try {
     const thumb = await derivative(buf, 400);
-    await writeVersion(
+    const wrote = await writeVersion(
       deps,
       assetId,
       VersionType.THUMBNAIL,
@@ -183,12 +185,13 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
       thumb.width,
       thumb.height,
     );
-  } catch (e) {
+    if (wrote.created) newOptBytes += wrote.bytes;
+  } catch {
     failures.push("thumbnail");
   }
   try {
     const v1280 = await derivative(buf, 1280);
-    await writeVersion(
+    const wrote = await writeVersion(
       deps,
       assetId,
       VersionType.OPTIMIZED_1280,
@@ -198,12 +201,13 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
       v1280.width,
       v1280.height,
     );
+    if (wrote.created) newOptBytes += wrote.bytes;
   } catch {
     failures.push("optimized_1280");
   }
   try {
     const v2560 = await derivative(buf, 2560);
-    await writeVersion(
+    const wrote = await writeVersion(
       deps,
       assetId,
       VersionType.OPTIMIZED_2560,
@@ -213,6 +217,7 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
       v2560.width,
       v2560.height,
     );
+    if (wrote.created) newOptBytes += wrote.bytes;
   } catch {
     failures.push("optimized_2560");
   }
@@ -232,10 +237,6 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
     failureReason = failures.join(",") || null;
   }
 
-  const optBytes = versions
-    .filter((v) => v.versionType !== VersionType.ORIGINAL)
-    .reduce((acc, v) => acc + Number(v.bytes), 0);
-
   await deps.prisma.mediaAsset.update({
     where: { id: assetId },
     data: {
@@ -251,13 +252,14 @@ export async function processImageJob(deps: ProcessDeps, assetId: string): Promi
       exifSummary: exifSummary as object | undefined,
       status,
       failureReason,
+      currentDisplay: hasThumb ? VersionType.THUMBNAIL : asset.currentDisplay,
     },
   });
 
-  if (optBytes) {
+  if (newOptBytes) {
     await deps.prisma.space.update({
       where: { id: asset.spaceId },
-      data: { usedOptimizedBytes: { increment: BigInt(optBytes) } },
+      data: { usedOptimizedBytes: { increment: BigInt(newOptBytes) } },
     });
   }
 }

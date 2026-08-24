@@ -18,6 +18,7 @@ export const PRESENTATION_PRESETS = {
     blocks: [
       { type: "cover", data: { heading: "家庭纪念", subtitle: "把共同的日子留下来" } },
       { type: "text", data: { heading: "我们的故事", body: "从一张张照片里，重新走一遍一起走过的路。" } },
+      { type: "image", data: { mediaAssetId: null as string | null } },
       { type: "gallery", data: { mediaAssetIds: [] as string[] } },
       { type: "slideshow", data: { slideshowId: null as string | null } },
       { type: "timeline", data: { mediaAssetIds: [] as string[] } },
