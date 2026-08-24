@@ -1,0 +1,14 @@
+# Verification-only local dependencies. Product form is a cloud service (D-002).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: picenter
+      POSTGRES_PASSWORD: picenter
+      POSTGRES_DB: picenter
+    ports:
+      - "5432:5432"
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

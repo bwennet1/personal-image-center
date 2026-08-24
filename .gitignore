@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.next/
+data/
+*.log
+.env
+.env.local
+coverage/
+apps/api/data/
+apps/web/.next/
+apps/api/generated/
+.DS_Store
+*.tsbuildinfo

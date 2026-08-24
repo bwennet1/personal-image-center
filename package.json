@@ -1,0 +1,20 @@
+{
+  "name": "personal-image-center",
+  "private": true,
+  "description": "个人图片中心 — Personal Image Center",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "postinstall": "npm run prisma:generate -w @pic/api",
+    "typecheck": "npm run typecheck -w @pic/api && npm run typecheck -w @pic/web",
+    "test": "npm run test -w @pic/api",
+    "prisma:push": "npm run prisma:push -w @pic/api",
+    "dev:api": "npm run start -w @pic/api",
+    "dev:web": "npm run dev -w @pic/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

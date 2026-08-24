@@ -1,0 +1,527 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SpaceType {
+  PERSONAL
+  FAMILY
+  TEAM
+}
+
+enum SpaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum MediaStatus {
+  UPLOADING
+  UPLOADED
+  PROCESSING
+  READY
+  PARTIAL_READY
+  PROCESSING_FAILED
+  TRASHED
+  PURGING
+  PURGED
+}
+
+enum VersionType {
+  ORIGINAL
+  THUMBNAIL
+  OPTIMIZED_1280
+  OPTIMIZED_2560
+  AI_ENHANCED
+  EDITED
+}
+
+enum UploadSessionStatus {
+  CREATED
+  UPLOADING
+  UPLOADED
+  VERIFYING
+  COMMITTED
+  EXPIRED
+  FAILED
+  CANCELLED
+}
+
+enum ShareAccessMode {
+  PUBLIC
+  PASSWORD
+  LOGIN_REQUIRED
+}
+
+enum ShareTargetType {
+  MEDIA
+  ALBUM
+  SLIDESHOW
+  PRESENTATION
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?
+  emailVerified Boolean  @default(false)
+  displayName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions        Session[]
+  oauthIdentities OAuthIdentity[]
+  magicLinks      MagicLink[]
+  passwordResets  PasswordReset[]
+  memberships     SpaceMember[]
+  ownedSpaces     Space[]         @relation("SpaceOwner")
+  uploadedMedia   MediaAsset[]    @relation("MediaUploader")
+  favorites       Favorite[]
+  auditLogs       AuditLog[]
+}
+
+model OAuthIdentity {
+  id         String   @id @default(cuid())
+  userId     String
+  provider   String
+  providerId String
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+  @@index([userId])
+}
+
+model MagicLink {
+  id        String    @id @default(cuid())
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?
+
+  @@index([email])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Space {
+  id                 String    @id @default(cuid())
+  type               SpaceType
+  name               String
+  ownerId            String
+  keepOriginal       Boolean   @default(true)
+  trashRetentionDays Int       @default(30)
+  quotaBytes         BigInt    @default(10737418240)
+  maxFileBytes       BigInt    @default(52428800)
+  usedOriginalBytes  BigInt    @default(0)
+  usedOptimizedBytes BigInt    @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  owner              User      @relation("SpaceOwner", fields: [ownerId], references: [id])
+
+  members       SpaceMember[]
+  media         MediaAsset[]
+  folders       Folder[]
+  albums        Album[]
+  tags          Tag[]
+  slideshows    Slideshow[]
+  presentations Presentation[]
+  shares        ShareLink[]
+  uploadSessions UploadSession[]
+  jobs          JobRecord[]
+  auditLogs     AuditLog[]
+  usageRecords  UsageRecord[]
+  subscription  Subscription?
+  storageProfile StorageProfile?
+}
+
+model SpaceMember {
+  id        String    @id @default(cuid())
+  spaceId   String
+  userId    String
+  role      SpaceRole
+  createdAt DateTime  @default(now())
+  space     Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([spaceId, userId])
+  @@index([userId])
+}
+
+model StorageProfile {
+  id        String   @id @default(cuid())
+  spaceId   String   @unique
+  provider  String   @default("r2")
+  bucket    String?
+  prefix    String?
+  createdAt DateTime @default(now())
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+}
+
+model Plan {
+  id              String         @id @default(cuid())
+  name            String         @unique
+  maxStorageBytes BigInt
+  maxFileBytes    BigInt
+  subscriptions   Subscription[]
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  spaceId   String   @unique
+  planId    String
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  plan      Plan     @relation(fields: [planId], references: [id])
+}
+
+model UsageRecord {
+  id        String   @id @default(cuid())
+  spaceId   String
+  month     String
+  uploadBytes BigInt @default(0)
+  aiCalls   Int      @default(0)
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  @@unique([spaceId, month])
+}
+
+model Folder {
+  id        String   @id @default(cuid())
+  spaceId   String
+  parentId  String?
+  name      String
+  createdAt DateTime @default(now())
+  space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  parent    Folder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children  Folder[] @relation("FolderTree")
+  media     MediaAsset[]
+
+  @@index([spaceId, parentId])
+}
+
+model MediaAsset {
+  id               String      @id @default(cuid())
+  spaceId          String
+  uploaderId       String
+  folderId         String?
+  originalFilename String
+  mimeType         String?
+  width            Int?
+  height           Int?
+  aspectRatio      Float?
+  fileHash         String?
+  perceptualHash   String?
+  capturedAt       DateTime?
+  uploadedAt       DateTime    @default(now())
+  latitude         Float?
+  longitude        Float?
+  locationText     String?
+  exifSummary      Json?
+  status           MediaStatus @default(UPLOADING)
+  failureReason    String?
+  trashedAt        DateTime?
+  statusBeforeTrash MediaStatus?
+  currentDisplay   VersionType @default(ORIGINAL)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  space     Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  uploader  User         @relation("MediaUploader", fields: [uploaderId], references: [id])
+  folder    Folder?      @relation(fields: [folderId], references: [id])
+  versions  MediaVersion[]
+  albumItems AlbumItem[]
+  tags      MediaTag[]
+  favorites Favorite[]
+  slideshowItems SlideshowItem[]
+
+  @@index([spaceId, status, capturedAt, id])
+  @@index([spaceId, uploadedAt])
+  @@index([fileHash])
+}
+
+model MediaVersion {
+  id              String      @id @default(cuid())
+  mediaAssetId    String
+  versionType     VersionType
+  storageProvider String
+  objectKey       String
+  mimeType        String
+  width           Int?
+  height          Int?
+  bytes           BigInt
+  checksum        String?
+  createdAt       DateTime    @default(now())
+  processingMeta  Json?
+  media           MediaAsset  @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaAssetId, versionType])
+  @@index([objectKey])
+}
+
+model UploadSession {
+  id             String              @id @default(cuid())
+  spaceId        String
+  userId         String
+  filename       String
+  declaredMime   String
+  declaredBytes  BigInt
+  objectKey      String
+  status         UploadSessionStatus @default(CREATED)
+  expiresAt      DateTime
+  mediaAssetId   String?
+  checksum       String?
+  failureReason  String?
+  createdAt      DateTime            @default(now())
+  space          Space               @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, userId])
+}
+
+model Album {
+  id           String      @id @default(cuid())
+  spaceId      String
+  name         String
+  description  String?
+  coverAssetId String?
+  sortMode     String      @default("manual")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  space        Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  items        AlbumItem[]
+  slideshows   Slideshow[]
+
+  @@index([spaceId])
+}
+
+model AlbumItem {
+  id           String     @id @default(cuid())
+  albumId      String
+  mediaAssetId String
+  sortOrder    Int        @default(0)
+  album        Album      @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  media        MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, mediaAssetId])
+}
+
+model Tag {
+  id        String     @id @default(cuid())
+  spaceId   String
+  name      String
+  source    String     @default("user")
+  space     Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  media     MediaTag[]
+
+  @@unique([spaceId, name])
+}
+
+model MediaTag {
+  mediaAssetId String
+  tagId        String
+  source       String     @default("user")
+  media        MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  tag          Tag        @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([mediaAssetId, tagId])
+}
+
+model Favorite {
+  userId       String
+  mediaAssetId String
+  spaceId      String
+  createdAt    DateTime   @default(now())
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  media        MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@id([userId, mediaAssetId])
+  @@index([spaceId, userId])
+}
+
+model Slideshow {
+  id              String          @id @default(cuid())
+  spaceId         String
+  albumId         String?
+  title           String
+  stayDurationMs  Int             @default(6000)
+  transition      String          @default("cross_fade")
+  transitionMs    Int             @default(900)
+  background      String          @default("blur")
+  loop            Boolean         @default(true)
+  random          Boolean         @default(false)
+  captions        Boolean         @default(false)
+  showDate        Boolean         @default(false)
+  showLocation    Boolean         @default(false)
+  musicUrl        String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  space           Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  album           Album?          @relation(fields: [albumId], references: [id])
+  items           SlideshowItem[]
+}
+
+model SlideshowItem {
+  id           String     @id @default(cuid())
+  slideshowId  String
+  mediaAssetId String
+  sortOrder    Int        @default(0)
+  slideshow    Slideshow  @relation(fields: [slideshowId], references: [id], onDelete: Cascade)
+  media        MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([slideshowId, mediaAssetId])
+}
+
+model Presentation {
+  id           String               @id @default(cuid())
+  spaceId      String
+  title        String
+  description  String?
+  coverAssetId String?
+  theme        String               @default("memorial")
+  background   Json?
+  musicUrl     String?
+  preset       String?
+  published    Boolean              @default(false)
+  publishToken String?              @unique
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  space        Space                @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  blocks       PresentationBlock[]
+}
+
+model PresentationBlock {
+  id             String       @id @default(cuid())
+  presentationId String
+  type           String
+  sortOrder      Int          @default(0)
+  data           Json
+  presentation   Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+
+  @@index([presentationId, sortOrder])
+}
+
+model ShareLink {
+  id                      String          @id @default(cuid())
+  spaceId                 String
+  token                   String          @unique
+  targetType              ShareTargetType
+  targetId                String
+  accessMode              ShareAccessMode @default(PUBLIC)
+  passwordHash            String?
+  expiresAt               DateTime?
+  maxViews                Int?
+  viewCount               Int             @default(0)
+  revokedAt               DateTime?
+  allowDownloadOptimized  Boolean         @default(true)
+  allowDownloadOriginal   Boolean         @default(false)
+  showExif                Boolean         @default(false)
+  showGps                 Boolean         @default(false)
+  createdAt               DateTime        @default(now())
+  space                   Space           @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  sessions                ShareSession[]
+
+  @@index([spaceId, targetType, targetId])
+}
+
+model ShareSession {
+  id          String    @id @default(cuid())
+  shareLinkId String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  share       ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+}
+
+model JobRecord {
+  id          String    @id @default(cuid())
+  type        String
+  spaceId     String
+  targetId    String?
+  status      JobStatus @default(PENDING)
+  progress    Int       @default(0)
+  attempts    Int       @default(0)
+  errorCode   String?
+  errorMessage String?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  space       Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+
+  @@index([spaceId, status])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  spaceId   String?
+  actorId   String?
+  action    String
+  target    String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  space     Space?   @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([spaceId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model AiAnalysis {
+  id           String   @id @default(cuid())
+  mediaAssetId String
+  provider     String
+  kind         String
+  status       String   @default("pending")
+  payload      Json?
+  createdAt    DateTime @default(now())
+
+  @@index([mediaAssetId, kind])
+}

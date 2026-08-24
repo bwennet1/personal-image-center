@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Grok
+Name[zh_CN]=Grok
+Comment=xAI Grok CLI (a copy starts in that folder)
+Comment[zh_CN]=复制到哪个文件夹，就从哪个文件夹启动 Grok
+Exec=/home/box/.local/bin/grok-from-desktop %k
+Icon=/home/box/.local/share/pixmaps/grok.png
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

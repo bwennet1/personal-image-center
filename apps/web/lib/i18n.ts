@@ -1,0 +1,25 @@
+export const zh = {
+  appName: "个人图片中心",
+  tagline: "把生活里的光，好好放在一处。",
+  login: "登录",
+  register: "注册",
+  email: "邮箱",
+  password: "密码",
+  displayName: "昵称",
+  logout: "退出",
+  photos: "全部图片",
+  albums: "相册",
+  folders: "文件夹",
+  favorites: "收藏",
+  timeline: "时间轴",
+  trash: "回收站",
+  slideshows: "幻灯片",
+  presentations: "纪念网页",
+  shared: "分享",
+  settings: "设置",
+  upload: "上传",
+  empty: "这个空间还没有图片。把照片拖到这里，或点击上传。",
+  space: "当前空间",
+};
+
+export type Messages = typeof zh;
